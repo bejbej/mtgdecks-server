@@ -43,4 +43,58 @@ module.exports = (app) => {
         await user.save();
         response.status(200).json({ token: createJWT(user) });
     });
+
+    app.post("/api/auth/google2", async (request, response) => {
+        const authorizationHeader = request.header("Authorization");
+
+        if (authorizationHeader === undefined) {
+            response.status(401).json({ message: "Authorization header is required." });
+            return;
+        }
+
+        const match = /Bearer (.+)/.exec(authorizationHeader);
+
+        if (match === null) {
+            response.status(401).json({ message: "Authorization header has an invalid bearer token." });
+            return;
+        }
+
+        const googleAccessToken = match[1];
+        const identityToken = JSON.parse(await http.get(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${googleAccessToken}`));
+        
+        if (identityToken.audience !== process.env.clientId) {
+            response.status(401).json({ message: "Invalid audience." });
+            return;
+        }
+        
+        const user = await getOrCreateUser(identityToken.user_id);
+        const payload = createJwtPayload(user);
+        const accessToken = jwt.encode(payload, process.env.tokenSecret);
+
+        response.status(200).json({
+            ...payload,
+            accessToken: accessToken
+        });
+    });
+
+    async function getOrCreateUser(googleId) {
+        const user = await db.User.findOne({ google: googleId });
+        if (user) {
+            return user;
+        }
+
+        const newUser = new db.User();
+        newUser.name = identityToken.email;
+        newUser.google = tokenInfo.user_id
+        await user.save();
+        return newUser;
+    }
+
+    function createJwtPayload(user) {
+        return {
+            sub: user._id,
+            iat: moment().unix(),
+            exp: moment().add(14, 'days').unix()
+        }
+    }
 }
